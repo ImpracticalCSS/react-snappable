@@ -1,15 +1,13 @@
 import { PointWithDimensions } from "../types";
 
-export function isAtRightEdge() {}
-
-export function isPastRightEdge() {}
-
-export function isAtLeftEdge() {}
-
-export function isPastLeftEdge() {}
+export function isPastEdge(point: PointWithDimensions, rect: DOMRect) {
+    console.log(point, rect);
+    if (point.x < rect.x) return true;
+    return false;
+}
 
 export function isWithinBoundingBox(point: PointWithDimensions, rect: DOMRect) {
-  const { x, y, width, height } = point;
+  const { x, y } = point;
 
   return (
     rect.x <= x &&

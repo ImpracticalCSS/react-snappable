@@ -7,7 +7,6 @@ export default {
   title: "Playground",
   component: Grid,
   parameters: {
-    // layout: 'fullscreen',
   },
 } as ComponentMeta<typeof Grid>;
 

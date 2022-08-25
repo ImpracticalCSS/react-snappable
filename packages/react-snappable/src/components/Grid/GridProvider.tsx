@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import ExtendedMap from "../../classes/ExtendedMap";
 import { Dimensions, Maybe, Point } from "../../types";
-import { isWithinBoundingBox } from "../../utils/grid";
+import { isPastEdge, isWithinBoundingBox } from "../../utils/grid";
 import {
   GridContextPaneProps,
   GridContextProps,
@@ -154,17 +154,6 @@ const GridProvider = ({
       return (point: Point) => {
         if (grid && node) {
           moveSnappable(point, node);
-
-          const { width, height } = node.getBoundingClientRect();
-
-          const pane = panes.find((pane) => {
-            const rect = pane.node.getBoundingClientRect();
-
-            return isWithinBoundingBox({ ...point, width, height }, rect);
-          });
-
-          if (pane) {
-          }
         }
       };
     },
@@ -182,7 +171,7 @@ const GridProvider = ({
           const pane = panes.find((pane) => {
             const rect = pane.node.getBoundingClientRect();
 
-            return isWithinBoundingBox(snappableNode, rect);
+            return isPastEdge(snappableNode, rect);
           });
 
           if (pane) {
