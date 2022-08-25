@@ -7,30 +7,29 @@ import GridProvider, { useGrid } from "./GridProvider";
 const GridInner = ({
   id,
   children,
+  panes
 }: React.PropsWithChildren<GridProps>): JSX.Element => {
   const grid = useGrid();
   const ref = useRef<HTMLDivElement | null>(null);
-
-  console.log(grid);
 
   useEffect(() => {
     if (ref.current) grid.grid(ref.current);
   }, []);
 
   return (
-    <Styled.Grid
-      ref={ref}
-      id={id}
-    >
-      {children ? (
-        children
-      ) : (
-        <>
-          <Pane />
-          <Pane />
-        </>
-      )}
-    </Styled.Grid>
+    <>
+      <Styled.Grid ref={ref} id={id}>
+        {panes ? (
+          panes
+        ) : (
+          <>
+            <Pane />
+            <Pane />
+          </>
+        )}
+      </Styled.Grid>
+      {children}
+    </>
   );
 };
 

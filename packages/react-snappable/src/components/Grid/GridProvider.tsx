@@ -5,9 +5,21 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { GridContextPaneProps, GridContextProps } from "./Grid.types";
+import ExtendedMap from "../../classes/ExtendedMap";
+import { Dimensions, Maybe, Point } from "../../types";
+import { isWithinBoundingBox } from "../../utils/grid";
+import {
+  GridContextPaneProps,
+  GridContextProps,
+  GridContextSnappableProps,
+  PaneInfo,
+  SnappableApi,
+} from "./Grid.types";
 
-const warnReRegisteringPane = (info: Omit<GridContextPaneProps, "index">) =>
+class PanesMap extends ExtendedMap<HTMLElement, GridContextPaneProps> {}
+class SnappablesMap extends ExtendedMap<HTMLElement, GridContextSnappableProps> {}
+
+const warnReRegisteringPane = (info: PaneInfo) =>
   console.warn(
     "You are attempting to register a pane more than once. Ensure that `registerPane` is only called once.",
     info
@@ -16,41 +28,106 @@ const warnReRegisteringPane = (info: Omit<GridContextPaneProps, "index">) =>
 const GridContext =
   React.createContext<GridContextProps | undefined>(undefined);
 
+
 const GridProvider = ({
   children,
 }: React.PropsWithChildren<{}>): JSX.Element => {
-  const [panes, setPanes] = useState<GridContextPaneProps[]>([]);
+  const [panes, setPanes] = useState<PanesMap>(new PanesMap());
 
-  const registerPane = useCallback(
-    (info: Omit<GridContextPaneProps, "index">) => {
-      setPanes((prevPanes) => {
-        const { node } = info;
+  const [snappables, setSnappables] = useState<SnappablesMap>(
+    new SnappablesMap()
+  );
 
-        if (prevPanes.findIndex((pane) => pane.node === node) > -1) {
-          warnReRegisteringPane(info);
-          return prevPanes;
+  const [grid, setGrid] = useState<HTMLElement | null>(null);
+
+  const registerSnappable = useCallback(
+    (element: HTMLElement | undefined | null) => {
+      setSnappables((prevSnappables) => {
+        if (!element || prevSnappables.has(element)) {
+          return prevSnappables;
         }
 
-        const nextPanes = [...prevPanes];
-        const index = prevPanes.length;
+        const { x, y, width, height } = element.getBoundingClientRect();
 
-        nextPanes.push({
-          index,
-          ...info,
-        });
-
-        return nextPanes;
+        return new SnappablesMap(
+          prevSnappables.set(element, {
+            index: prevSnappables.size,
+            node: element,
+            x,
+            y,
+            width,
+            height,
+          })
+        );
       });
     },
     []
   );
 
+  const moveSnappable = useCallback((point: Point, element: HTMLElement) => {
+    setSnappables((prevSnappables) => {
+      const prevSnappable = prevSnappables.get(element);
+
+      if (!prevSnappable) {
+        return prevSnappables;
+      }
+
+      return new SnappablesMap(
+        prevSnappables.set(element, {
+          ...prevSnappable,
+          ...point,
+        })
+      );
+    });
+  }, []);
+
+  const resizeSnappable = useCallback(
+    (dimensions: Dimensions, element: HTMLElement) => {
+      setSnappables((prevSnappables) => {
+        const prevSnappable = prevSnappables.get(element);
+
+        if (!prevSnappable) {
+          return prevSnappables;
+        }
+
+        return new SnappablesMap(
+          prevSnappables.set(element, {
+            ...prevSnappable,
+            ...dimensions,
+          })
+        );
+      });
+    },
+    []
+  );
+
+  const registerPane = useCallback((info: PaneInfo) => {
+    setPanes((prevPanes) => {
+      const { node } = info;
+
+      if (prevPanes.find((pane) => pane.node === node)) {
+        warnReRegisteringPane(info);
+        return prevPanes;
+      }
+
+      return new PanesMap(
+        prevPanes.set(node, {
+          index: prevPanes.size,
+          rect: node.getBoundingClientRect(),
+          ...info,
+        })
+      );
+    });
+  }, []);
+
   const updatePanes = useCallback(() => {
     setPanes((prevPanes) => {
-      return prevPanes.map((pane) => {
+      const nextPanes = new PanesMap();
+
+      prevPanes.forEach((pane, key) => {
         const { node, index } = pane;
 
-        return {
+        nextPanes.set(key, {
           node,
           index,
           position: { x: node.offsetLeft, y: node.offsetTop },
@@ -58,8 +135,11 @@ const GridProvider = ({
             width: node.clientWidth,
             height: node.clientHeight,
           },
-        };
-      }, []);
+          rect: node.getBoundingClientRect(),
+        });
+      });
+
+      return nextPanes;
     });
   }, []);
 
@@ -69,17 +149,83 @@ const GridProvider = ({
     });
   }, []);
 
-  const observeGrid = useCallback((element: Element) => {
+  const makeSnappableDragHandler = useCallback(
+    (node: Maybe<HTMLElement>) => {
+      return (point: Point) => {
+        if (grid && node) {
+          moveSnappable(point, node);
+
+          const { width, height } = node.getBoundingClientRect();
+
+          const pane = panes.find((pane) => {
+            const rect = pane.node.getBoundingClientRect();
+
+            return isWithinBoundingBox({ ...point, width, height }, rect);
+          });
+
+          if (pane) {
+          }
+        }
+      };
+    },
+    [grid, panes]
+  );
+
+  const makeSnappableDragFinishedHandler = useCallback(
+    (node: Maybe<HTMLElement>) => {
+      return (point: Point) => {
+        if (node) {
+          moveSnappable(point, node);
+
+          const snappableNode = node.getBoundingClientRect();
+
+          const pane = panes.find((pane) => {
+            const rect = pane.node.getBoundingClientRect();
+
+            return isWithinBoundingBox(snappableNode, rect);
+          });
+
+          if (pane) {
+            const { width, height, x, y } = pane.node.getBoundingClientRect();
+
+            moveSnappable({ x, y }, node);
+            resizeSnappable({ width, height }, node);
+          }
+        }
+      };
+    },
+    [grid, panes]
+  );
+
+  const makeSnappable = useCallback(
+    (node: Maybe<HTMLElement>): SnappableApi => {
+      const snappable = node ? snappables.get(node) : null;
+
+      return {
+        onDrag: makeSnappableDragHandler(node),
+        onDragFinished: makeSnappableDragFinishedHandler(node),
+        x: snappable?.x ?? 0,
+        y: snappable?.y ?? 0,
+        width: snappable?.width ?? 0,
+        height: snappable?.height ?? 0,
+      };
+    },
+    [makeSnappableDragHandler, makeSnappableDragFinishedHandler, snappables]
+  );
+
+  const observeGrid = useCallback((element: HTMLElement) => {
+    setGrid(element);
     resizeObserver.observe(element);
   }, []);
 
   const value = useMemo<GridContextProps>(
     () => ({
-      panes,
       registerPane,
+      registerSnappable,
       grid: observeGrid,
+      makeSnappable,
     }),
-    [panes, registerPane, observeGrid]
+    [registerPane, registerSnappable, observeGrid, makeSnappable]
   );
 
   useEffect(() => {
@@ -95,10 +241,22 @@ export function useGrid() {
   const context = useContext(GridContext);
 
   if (context === undefined) {
-    throw new Error("");
+    throw new Error("`useGrid` must be used within a <Grid />");
   }
 
   return context;
+}
+
+export function useSnappable(
+  ref: React.MutableRefObject<HTMLElement | null>
+): SnappableApi {
+  const grid = useGrid();
+
+  useEffect(() => {
+    grid.registerSnappable(ref.current);
+  }, []);
+
+  return grid.makeSnappable(ref.current);
 }
 
 export default GridProvider;
